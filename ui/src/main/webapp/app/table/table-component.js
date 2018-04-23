@@ -46,6 +46,9 @@ function TableController(schema, results, table, events, common, types, time) {
     vm.sortType = undefined;
     vm.schema = {edges:{}, entities:{}, types:{}};
 
+    vm.chartData = [];
+    vm.chartLabels = [];
+
     /**
      * Initialises the controller.
      * Fetches the schema. Fetches the results and processes them.
@@ -88,6 +91,27 @@ function TableController(schema, results, table, events, common, types, time) {
             }
         }
         updateColumns();
+
+        vm.chartLabels = [];
+        vm.chartData = [];
+
+        for(var i in vm.data.results) {
+            var result = vm.data.results[i];
+            if(result.count && vm.data.groups.indexOf(result.group) > -1) {
+                var dataIndex = vm.chartLabels.indexOf(result.group);
+                if(dataIndex == -1) {
+                    vm.chartLabels.push(result.group);
+                    dataIndex = vm.chartLabels.length - 1;
+                }
+
+                var count = vm.chartData[dataIndex];
+                if(!count) {
+                    count = 0;
+                }
+                vm.chartData[dataIndex] = count + result.count;
+
+            }
+        }
     }
 
     /*
