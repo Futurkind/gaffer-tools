@@ -32,6 +32,12 @@ angular.module('app').config(['$locationProvider', '$routeProvider', function($l
             icon: 'table',
             inNav: true
         })
+        .when('/chart', {
+            title: 'Chart',
+            template: '<results-chart></results-chart>',
+            icon: 'raw',
+            inNav: true
+        })
         .when('/graph', {
             title: 'Graph',
             templateUrl: 'app/graph/graph-page.html',
@@ -57,7 +63,7 @@ angular.module('app').config(['$locationProvider', '$routeProvider', function($l
             inNav: true
         })
         .when('/results', {
-            redirectTo: '/table'
+            redirectTo: '/chart'
         })
         .when('/', {
             redirectTo: '/query'

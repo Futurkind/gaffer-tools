@@ -2,8 +2,12 @@
     <h3 class="section-title">Add Filters</h3>
 
     <named-views></named-views>
-    <md-button ng-show="!ctrl.showBuilder" id="create-custom-filter" ng-click="ctrl.makeVisible()">Create custom filter</md-button>
-    <md-button ng-show="ctrl.showBuilder" id="clear-custom-filter" ng-click="ctrl.clear()">Clear custom filter</md-button>
+    <md-button ng-show="!ctrl.showBuilder" id="create-custom-filter"
+               ng-click="ctrl.makeVisible()">Create custom filter
+    </md-button>
+    <md-button ng-show="ctrl.showBuilder" id="clear-custom-filter"
+               ng-click="ctrl.clear()">Clear custom filter
+    </md-button>
 
     <div ng-show="ctrl.showBuilder">
         <div layout="row" layout-padding>
@@ -54,7 +58,8 @@
         <md-list>
             <div ng-repeat="entity in ctrl.viewEntities track by entity"
                  ng-if="ctrl.getEntityProperties(entity)">
-                <md-subheader class="transparent md-no-sticky">{{entity}} Filters
+                <md-subheader class="transparent md-no-sticky">{{entity}}
+                    Filters
                 </md-subheader>
                 <md-list-item class="secondary-button-padding"
                               ng-click="ctrl.editFilter(entity, 'entity', filter, $index)"
@@ -91,6 +96,18 @@
                 <md-divider ng-hide="ctrl.noMore(edge)"></md-divider>
             </div>
         </md-list>
+    </div>
+
+    <div layout-padding layout="row">
+        <md-input-container flex>
+            <md-checkbox ng-model="ctrl.summarise"
+                         ng-change="ctrl.onSummariseChange()">
+                Summarise results
+            </md-checkbox>
+            <md-tooltip md-direction="down">
+                Do you want to apply query time aggregation?
+            </md-tooltip>
+        </md-input-container>
     </div>
 
 </div>

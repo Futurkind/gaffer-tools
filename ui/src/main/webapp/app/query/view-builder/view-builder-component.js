@@ -56,7 +56,7 @@ function viewBuilder() {
 
 function ViewBuilderController(view, graph, common, schema, functions, events, types, $mdDialog) {
     var vm = this;
-
+    vm.summarise = view.getSummarise();
     vm.schemaEntities;
     vm.schemaEdges;
     vm.viewEdges = view.getViewEdges();
@@ -68,6 +68,10 @@ function ViewBuilderController(view, graph, common, schema, functions, events, t
 
     vm.makeVisible = function() {
         vm.showBuilder = true;
+    }
+
+    vm.onSummariseChange = function() {
+        view.setSummarise(vm.summarise);
     }
 
     vm.clear = function() {

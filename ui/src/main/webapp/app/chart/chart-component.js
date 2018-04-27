@@ -16,18 +16,18 @@
 
 'use strict'
 
-angular.module('app').component('resultsTable', resultsTable());
+angular.module('app').component('resultsChart', resultsChart());
 
-function resultsTable() {
+function resultsChart() {
     return {
-        templateUrl: 'app/table/table.html',
-        controller: TableController,
+        templateUrl: 'app/chart/chart.html',
+        controller: ChartController,
         controllerAs: 'ctrl'
     };
 }
 
 /**
- * The controller for the table page..
+ * The controller for the chart page..
  * @param {*} schema For looking up information about the different groups and types.
  * @param {*} results For retrieving the results
  * @param {*} table For caching user table view preferences
@@ -36,44 +36,40 @@ function resultsTable() {
  * @param {*} types For converting objects based on their types
  * @param {*} time For converting time objects
  */
-function TableController(schema, results, table, events, common, types, time) {
-    var initialNumberOfColumnsToShow = 8;
+function ChartController(schema, results, chart, events, common, types, time, error) {
+    var maxXaxisValues = 50;
+    var freq = "FREQUENCY";
+    
     var vm = this;
     var resultsByType = [];
     vm.searchTerm = undefined;
-    vm.data = {results:[], columns:[]};
+    vm.data = {results:[], column:'count'};
     vm.searchTerm = '';
     vm.sortType = undefined;
     vm.schema = {edges:{}, entities:{}, types:{}};
 
+    vm.chartData = [];
+    vm.chartLabels = [];
+    
+
     /**
      * Initialises the controller.
      * Fetches the schema. Fetches the results and processes them.
-     * Loads any cached table preferences and subscribes to resultsUpdated events.
+     * Subscribes to resultsUpdated events.
      */
     vm.$onInit = function() {
         schema.get().then(function(gafferSchema) {
             vm.schema = gafferSchema;
             processResults(results.get());
-            loadFromCache();
             events.subscribe('resultsUpdated', onResultsUpdated);
         });
     }
 
     /**
-     * Cleans up the controller. Unsubscribes from resultsUpdated events and
-     * caches table preferences.
+     * Cleans up the controller. Unsubscribes from resultsUpdated events
      */
     vm.$onDestroy = function() {
         events.unsubscribe('resultsUpdated', onResultsUpdated);
-        cacheValues();
-    }
-
-    vm.hideColumn = function(column) {
-        var index = vm.data.columns.indexOf(column);
-        if (index > -1) {
-            vm.data.columns.splice(index, 1);
-        }
     }
 
     vm.updateFilteredResults = function() {
@@ -87,7 +83,80 @@ function TableController(schema, results, table, events, common, types, time) {
                 }
             }
         }
-        updateColumns();
+
+        vm.chartLabels = [];
+        vm.chartData = [];
+        var xValues = [];
+        var yValues = [];
+        for(var i in vm.data.results) {
+            var result = vm.data.results[i];
+            if(result[vm.xaxis] !== undefined) {
+               xValues.push(result[vm.xaxis]);
+               yValues.push(result[vm.yaxis] !== undefined ? result[vm.yaxis] : 1)
+            }
+        }
+
+        var dedupedValues = [];
+        common.pushValuesIfUnique(xValues, dedupedValues);
+        
+        if(isNumberValue()) {
+            var numBuckets = Math.min(dedupedValues.length, maxXaxisValues);
+            var min = Math.min.apply(0, xValues);
+            var max = Math.max.apply(0, xValues);
+            var bucketSize = (max - min)/numBuckets;
+            var buckets = [];
+            vm.chartLabels = [];
+            for(var i = 0; i<numBuckets; i++) {
+                buckets.push(0);
+                var bucketValue = min + bucketSize * (i + 0.5);
+                if(isInteger()) {
+                    bucketValue = Math.round(bucketValue);
+                }
+                if(isTime()) {
+                    bucketValue =  time.getDateString(vm.xaxis, bucketValue);
+                }
+                vm.chartLabels.push(bucketValue);
+            }
+            for(var i in xValues) {
+                var value = xValues[i];
+                var bucketIndex = Math.floor((value-min)/bucketSize);
+                if(bucketIndex >= numBuckets) {
+                    bucketIndex = numBuckets - 1;
+                }
+                buckets[bucketIndex] += yValues[i];
+            }
+            vm.chartData = buckets;
+        } else {
+            if(dedupedValues.length > maxXaxisValues) {
+                error.handle("Too many different values to show on x-axis. Only the first " + maxXaxisValues + " will be shown.");
+                dedupedValues.splice(0, dedupedValues + 1);
+            }
+            dedupedValues.sort();
+            vm.chartLabels = dedupedValues;
+            vm.chartData = [];
+            for(var i in xValues) {
+                var index = dedupedValues.indexOf(xValues[i]);
+                if(index > -1) {
+                    if(vm.chartData[index]) {
+                        vm.chartData[index] += yValues[i];
+                    } else {
+                        vm.chartData[index] = yValues[i];
+                    }
+                }
+            }
+        }
+    }
+
+    var isNumberValue = function() {
+        return isInteger() || isTime();
+    }
+
+    var isInteger = function() {
+        return 'count' === vm.xaxis || isTime();
+    }
+
+    var isTime = function() {
+        return time.isTimeProperty(vm.xaxis);
     }
 
     /*
@@ -104,19 +173,11 @@ function TableController(schema, results, table, events, common, types, time) {
         return "group";
     }
 
-    /*
-     * Text for the select columns component.
-     * 'Choose columns' and conditionally shows 'X more' if there are hidden columns.
-     */
-    vm.selectedColumnsText = function() {
-        if(vm.data.columns && vm.data.allColumns && vm.data.allColumns.length > vm.data.columns.length) {
-            return "Choose columns (" + (vm.data.allColumns.length - vm.data.columns.length) + " more)";
-    }
-        return "Choose columns";
+    vm.onPropertyChange = function() {
+        vm.updateFilteredResults();
     }
 
     var onResultsUpdated = function(res) {
-        table.setCachedValues({});
         processResults(res);
     }
 
@@ -131,8 +192,17 @@ function TableController(schema, results, table, events, common, types, time) {
         processElements("Entity", "entities", ["type", "group", "source"], ids, groupByProperties, properties, resultsData);
         processOtherTypes(ids, properties, resultsData);
 
-        vm.data.allColumns = common.concatUniqueValues(common.concatUniqueValues(ids, groupByProperties), properties);
-        vm.data.columns = angular.copy(vm.data.allColumns).splice(0, initialNumberOfColumnsToShow + 1);
+        vm.allYaxis = [];
+        vm.allXaxis = common.concatUniqueValues(common.concatUniqueValues(ids, groupByProperties), properties);
+        if(vm.allXaxis.indexOf('count') > -1) {
+            vm.xaxis = 'count';
+            vm.allYaxis.push('count');
+        } else if(vm.allXaxis.length > 0) {
+            vm.xaxis = vm.allXaxis[0];
+        } else {
+            vm.xaxis = undefined;
+        }
+        vm.yaxis = 'FREQUENCY'
 
         vm.data.allTypes = [];
         vm.data.allGroups = [];
@@ -146,20 +216,6 @@ function TableController(schema, results, table, events, common, types, time) {
         vm.data.groups = angular.copy(vm.data.allGroups);
 
         vm.updateFilteredResults();
-    }
-
-    var updateColumns = function() {
-        var resultColumns = []
-        for(var i in vm.data.results) {
-            common.pushValuesIfUnique(Object.keys(vm.data.results[i]), resultColumns);
-        }
-        var newColumns = [];
-        for(var i in vm.data.columns) {
-            if(resultColumns.indexOf(vm.data.columns[i]) > -1) {
-                newColumns.push(vm.data.columns[i]);
-            }
-        }
-        vm.data.columns = newColumns.splice(0, initialNumberOfColumnsToShow + 1);
     }
 
     var processElements = function(type, typePlural, idKeys, ids, groupByProperties, properties, resultsData) {
@@ -263,46 +319,7 @@ function TableController(schema, results, table, events, common, types, time) {
                 parsedValue = value;
             }
             parsedValue = types.getShortValue(parsedValue);
-            if(time.isTimeProperty(name)) {
-                parsedValue = time.getDateString(name, parsedValue);
-            }
         }
         return parsedValue;
-    }
-
-    var loadFromCache = function() {
-        var cachedValues = table.getCachedValues();
-        vm.searchTerm = cachedValues.searchTerm;
-        vm.sortType =  cachedValues.sortType;
-        if(cachedValues.columns && cachedValues.columns.length > 0) {
-            vm.data.columns = cachedValues.columns;
-        }
-        if(cachedValues.types && cachedValues.types.length > 0) {
-            vm.data.types = cachedValues.types;
-        }
-        if(cachedValues.groups && cachedValues.groups.length > 0) {
-            vm.data.groups = cachedValues.groups;
-        }
-    }
-
-    var cacheValues = function() {
-        var cachedValues = {
-            searchTerm: vm.searchTerm,
-            sortType: vm.sortType
-        };
-
-        if(vm.data.columns && vm.data.allColumns && vm.data.columns.length < vm.data.allColumns.length) {
-            cachedValues.columns = vm.data.columns;
-        }
-
-        if(vm.data.types && vm.data.allTypes && vm.data.types < vm.data.allTypes.length) {
-            cachedValues.types = vm.data.types;
-        }
-
-        if(vm.data.groups && vm.data.allGroups && vm.data.groups < vm.data.allGroups.length) {
-            cachedValues.groups = vm.data.groups;
-        }
-
-        table.setCachedValues(cachedValues);
     }
 }

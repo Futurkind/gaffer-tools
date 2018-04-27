@@ -26,6 +26,15 @@ angular.module('app').factory('view', ['operationService', 'config', 'settings',
     var availableNamedViews;
     var firstLoad = true;
     var defer = $q.defer();
+    var summarise = true;
+
+    service.getSummarise = function() {
+        return summarise;
+    }
+
+    service.setSummarise = function(newSummarise) {
+        summarise = newSummarise;
+    }
 
     service.getNamedViews = function() {
         return namedViews;
@@ -65,6 +74,7 @@ angular.module('app').factory('view', ['operationService', 'config', 'settings',
         entityFilters = {};
         edgeFilters = {};
         namedViews = [];
+        summarise = true;
     }
 
     service.getAvailableNamedViews = function() {

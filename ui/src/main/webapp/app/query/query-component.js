@@ -283,12 +283,16 @@ function QueryController(queryPage, operationService, types, graph, config, sett
             var entityFilters = view.getEntityFilters();
 
             op.view = {
-                globalElements: [{
-                    groupBy: []
-                }],
                 entities: {},
                 edges: {}
             };
+
+            op.view.globalElements = [];
+            if(view.getSummarise()) {
+                op.view.globalElements.push({
+                    groupBy: []
+                });
+            }
 
             createElementView(viewEntities, entityFilters, op.view.entities);
             createElementView(viewEdges, edgeFilters, op.view.edges);
