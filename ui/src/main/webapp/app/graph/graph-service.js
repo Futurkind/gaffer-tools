@@ -159,6 +159,11 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
         return deferred.promise;
     }
 
+    /**
+     * Performs a quick hop - a GetElements operation with either the clicked
+     * node or the selected nodes.
+     * @param {Object} event an optional mouse click event.
+     */
     graph.quickHop = function(event) {
         var input
         if(event) {
@@ -169,7 +174,7 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
         if(input && input.length > 0) {
             loading.load();
             var operation = {
-                 class: "GetElements",
+                 class: "uk.gov.gchq.gaffer.operation.impl.get.GetElements",
                  input: createOpInput(input),
                  options: settings.getDefaultOpOptions(),
                  view: {
@@ -191,7 +196,7 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
                    ],
                    options: operation['options']
                 },
-                graph.deselectAll()
+                graph.deselectAll
             );
         } else {
             error.handle('Please select one or more vertices first');
@@ -521,8 +526,8 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
     }
 
     graph.removeSelected = function() {
-        graphCy.elements().unselect();
         graphCy.filter(":selected").remove();
+        graphCy.elements().unselect();
         selectedEdges = {};
         selectedEntities = {};
         events.broadcast('selectedElementsUpdate', [{"entities": selectedEntities, "edges": selectedEdges}]);
