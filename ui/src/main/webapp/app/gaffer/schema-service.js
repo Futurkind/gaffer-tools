@@ -23,10 +23,57 @@ angular.module('app').factory('schema', ['$http', 'config', '$q', 'common', 'ope
     var schema;
     var schemaVertices = {};
 
+    var style = {
+        entities: {
+            region: {
+                'icon-name': 'ic_details'
+            },
+            location: {
+                'icon-name': 'ic_location_on'
+            },
+             road: {
+                'icon-name': 'ic_linear_scale'
+            },
+             junction: {
+                'icon-name': 'ic_call_split'
+            },
+            coordinates: {
+                'icon-name': 'ic_location_searching'
+            }
+        },
+        edges: {
+            RegionContainsLocation: {
+                'default-color': '#1abc9c'
+            },
+            LocationContainsRoad: {
+                'default-color': '#3498db'
+            },
+            RoadHasJunction: {
+                'default-color': '#34495e'
+            },
+            RoadUse: {
+                'default-color': '#e74c3c'
+            },
+            JunctionLocatedAt: {
+                'default-color': '#f39c12'
+            }
+        }
+    };
+
     schemaService.get = function() {
         var defer = $q.defer();
         if (schema) {
             defer.resolve(schema);
+        } else {
+            load(defer);
+        }
+        return defer.promise;
+    }
+
+    schemaService.getStyle = function() {
+        var defer = $q.defer();
+        if (style) {
+            defer.resolve(style);
         } else {
             load(defer);
         }
@@ -69,7 +116,7 @@ angular.module('app').factory('schema', ['$http', 'config', '$q', 'common', 'ope
     var loadSchemaFromOperation = function(conf, defer) {
         try {
             query.execute(
-                JSON.stringify(operationService.createGetSchemaOperation()),
+                operationService.createGetSchemaOperation(),
                 function(response) {
                     schema = response;
                     if (!schema.entities) {

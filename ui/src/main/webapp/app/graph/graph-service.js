@@ -19,13 +19,14 @@
 /**
  * Graph service which handles selected elements and a cytoscape graph
  */
-angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'config', 'events', 'input', 'schema', function(types, $q, results, common, config, events, input, schemaService) {
-
+angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'config', 'events', 'input', 'schema', 'query', 'operationService', 'settings', 'loading', '$mdDialog', 'error', function(types, $q, results, common, config, events, input, schemaService, query, operationService, settings, loading, $mdDialog, error) {
     var graphCy;
     var graph = {};
-
     var selectedEntities = {};
     var selectedEdges = {};
+    var schema = {entities:{}, edges:{}, types:{}};
+    var tappedBefore;
+    var tappedTimeout;
 
     var layoutConf = {
         name: 'cytoscape-ngraph.forcelayout',
@@ -35,9 +36,9 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
             waitForStep: true
         },
         physics: {
-            springLength: 200,
-            dragCoeff: 0,
-            stableThreshold: 0.000001,
+            springLength: 250,
+            gravity: -6,
+            theta: 0.95,
             fit: true
         },
         iterations: 10000,
@@ -47,6 +48,88 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
 
     var graphData = {entities: {}, edges: {}};
 
+    var style = {
+        entity: {
+            general: {
+              'text-valign': 'top',
+              'font-size': 14,
+              'text-outline-color':'#fff',
+              'text-outline-width':2,
+              'width': '30',
+              'height': '30',
+              'shape': 'circle',
+              'background-fit': 'cover',
+              'background-clip': 'none',
+              'padding': '0px',
+              'min-zoomed-font-size': 10,
+              'default-color': '#aaa',
+              'selected-color': '#777'
+            },
+            hasEntities: {
+              'width': '30',
+              'height': '30',
+              'border-color': '#555',
+              'border-width': 2
+            }
+        },
+        edge: {
+            general: {
+                'curve-style': 'bezier',
+                'target-arrow-shape': 'triangle',
+                'font-size': 14,
+                'color': '#fff',
+                'text-outline-width':3,
+                'width': 5,
+                'min-zoomed-font-size': 30,
+                'default-color': '#aaa',
+                'selected-color': '#777'
+            }
+        },
+        entities: {},
+        edges: {}
+    };
+
+    var applyEntityStyle = function(type, hasEntities, entity) {
+        var entityStyle = angular.copy(style.entity.general);
+        if(hasEntities) {
+            angular.merge(entityStyle, angular.copy(style.entity.hasEntities));
+        }
+        if(type in style.entities) {
+            angular.merge(entityStyle, angular.copy(style.entities[type]));
+        }
+        if('icon-name' in entityStyle) {
+            entityStyle['background-image'] = 'app/img/material-icons/' + entityStyle['icon-name'] + '_24px.svg'
+            entityStyle.shape = 'roundrectangle';
+            entityStyle['default-color'] = '#fff';
+        } else if('background-image' in entityStyle) {
+            entityStyle.shape = 'roundrectangle';
+            entityStyle['default-color'] = '#fff';
+        }
+
+        if(!('data' in entity)) {
+            entity.data = {};
+        }
+        entity.data.type = type;
+        entity.data.hasEntities = hasEntities;
+        entity.data.defaultColor = entityStyle['default-color'];
+        entity.data.selectedColor = entityStyle['selected-color'];
+        entity.style = entityStyle;
+    }
+
+    var applyEdgeStyle = function(type, edge) {
+        var edgeStyle = angular.copy(style.edge.general);
+        if(type in style.edges) {
+            angular.merge(edgeStyle, angular.copy(style.edges[type]));
+        }
+
+        if(!('data' in edge)) {
+            edge.data = {};
+        }
+        edge.data.defaultColor = edgeStyle['default-color'];
+        edge.data.selectedColor = edgeStyle['selected-color'];
+        edge.style = edgeStyle;
+    }
+
     config.get().then(function(conf) {
         if(conf.graph && conf.graph.physics) {
             angular.merge(layoutConf.physics, conf.graph.physics);
@@ -54,9 +137,16 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
         }
     });
 
+    schemaService.get().then(function(gafferSchema) {
+        schema = gafferSchema;
+    });
+
+    schemaService.getStyle().then(function(schemaStyle) {
+        angular.merge(style, angular.copy(schemaStyle));
+    });
+
     events.subscribe('resultsUpdated', function(results) {
         graph.update(results);
-        graph.redraw();
     });
 
     /** 
@@ -86,37 +176,36 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
                     selector: 'node',
                     style: {
                         'content': 'data(label)',
-                        'text-valign': 'center',
-                        'background-color': 'data(color)',
-                        'font-size': 14,
-                        'color': '#fff',
-                        'text-outline-color':'data(color)',
-                        'text-outline-width':3,
-                        'width': 'data(radius)',
-                        'height': 'data(radius)'
+                        'background-color': 'data(defaultColor)'
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
-                        'curve-style': 'bezier',
                         'label': 'data(group)',
-                        'line-color': '#538212',
-                        'target-arrow-color': '#538212',
-                        'target-arrow-shape': 'triangle',
-                        'font-size': 14,
-                        'color': '#fff',
-                        'text-outline-color':'#538212',
-                        'text-outline-width':3,
-                        'width': 5
+                        'line-color': 'data(defaultColor)',
+                        'target-arrow-color': 'data(defaultColor)',
+                        'text-outline-color': 'data(defaultColor)'
                     }
                 },
                 {
-                    selector: ':selected',
+                    selector: 'node:selected',
                     css: {
-                        'background-color': 'data(selectedColor)',
-                        'line-color': '#35500F',
-                        'target-arrow-color': '#35500F'
+                        'background-color': 'data(selectedColor)'
+                    }
+                },
+                {
+                    selector: 'edge:selected',
+                     css: {
+                        'line-color': 'data(selectedColor)',
+                        'target-arrow-color': 'data(selectedColor)',
+                        'text-outline-color': 'data(selectedColor)'
+                    }
+                },
+                {
+                    selector: '.filtered',
+                    css: {
+                       display: "none"
                     }
                 }
             ],
@@ -135,7 +224,78 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
             unSelect(evt.cyTarget);
         })
 
+        graphCy.on('tap', function(event) {
+            var tappedNow = event.cyTarget;
+            if (tappedTimeout && tappedBefore) {
+                clearTimeout(tappedTimeout);
+            }
+            if(tappedBefore === tappedNow) {
+                tappedNow.trigger('doubleTap');
+                tappedBefore = null;
+            } else {
+                tappedTimeout = setTimeout(function(){ tappedBefore = null; }, 300);
+                tappedBefore = tappedNow;
+            }
+        });
+
+        graphCy.on('doubleTap', 'node', graph.quickHop);
+
         return deferred.promise;
+    }
+
+    /**
+     * Performs a quick hop - a GetElements operation with either the clicked
+     * node or the selected nodes.
+     * @param {Object} event an optional mouse click event.
+     */
+    graph.quickHop = function(event) {
+        var input
+        if(event) {
+            input = [event.cyTarget.id()];
+        } else {
+            input = Object.keys(graph.getSelectedEntities());
+        }
+        if(input && input.length > 0) {
+            loading.load();
+            var operation = {
+                 class: "uk.gov.gchq.gaffer.operation.impl.get.GetElements",
+                 input: createOpInput(input),
+                 options: settings.getDefaultOpOptions(),
+                 view: {
+                    globalElements: [
+                        {
+                            groupBy: []
+                        }
+                    ]
+                 }
+            };
+            query.addOperation(operation);
+            query.executeQuery(
+                {
+                   class: "uk.gov.gchq.gaffer.operation.OperationChain",
+                   operations: [
+                       operation,
+                       operationService.createLimitOperation(operation['options']),
+                       operationService.createDeduplicateOperation(operation['options'])
+                   ],
+                   options: operation['options']
+                },
+                graph.deselectAll
+            );
+        } else {
+            error.handle('Please select one or more vertices first');
+        }
+    }
+
+    var createOpInput = function(seeds) {
+        var opInput = [];
+        for (var i in seeds) {
+            opInput.push({
+                "class": "uk.gov.gchq.gaffer.operation.data.EntitySeed",
+                "vertex": JSON.parse(seeds[i])
+            });
+        }
+        return opInput;
     }
 
     /**
@@ -163,6 +323,7 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
     function selectEntities(id, entities) {
         selectedEntities[id] = entities;
         schemaService.get().then(function(gafferSchema) {
+            schema = gafferSchema;
             var vertex = JSON.parse(id);
             var vertices = schemaService.getSchemaVertices();
             var vertexClass = gafferSchema.types[vertices[0]].class;
@@ -242,32 +403,14 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
     }
 
     /**
-     * Updates the cytoscape graph and redraws it
-     */
-    graph.reload = function() {
-        updateGraph(graphData);
-        graph.redraw();
-    }
-
-    /**
-     * Resets the selected elements
+     * Resets the graph
      */
     graph.reset = function() {
-        selectedEdges = {};
-        selectedEntities = {};
-        graphCy.elements().unselect();
-        events.broadcast('selectedElementsUpdate'[{"entities": selectedEntities, "edges": selectedEdges}]);
+        graph.update(results.get());
     }
 
-    /**
-     * Stringifies a seed, adds it if it does not exist, selects it and updates the graph
-     * @param {*} seed 
-     */
-    graph.addSeed = function(seed) {
-        var entitySeed = JSON.stringify(seed);
-        common.pushValueIfUnique(entitySeed, graphData.entitySeeds);
-        selectVertex(entitySeed);
-        updateGraph(graphData);
+    var isLoaded = function() {
+        return graphCy && graphCy.isReady() && graphCy.style() !== undefined
     }
 
     /**
@@ -275,7 +418,11 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
      * @param {Array} results 
      */
     graph.update = function(results) {
+        graph.clear();
         graphData = { entities: {}, edges: {} };
+        if(!isLoaded()) {
+            return;
+        }
         for (var i in results.entities) {
             var entity = angular.copy(results.entities[i]);
             entity.vertex = common.parseVertex(entity.vertex);
@@ -308,35 +455,39 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
      */
     var updateGraph = function(results) {
         for (var id in results.entities) {
+            var entity = results.entities[id][0];
             var existingNodes = graphCy.getElementById(id);
             var isSelected = common.objectContainsValue(selectedEntities, id);
             if(existingNodes.length > 0) {
-                if(existingNodes.data().radius < 60) {
-                    existingNodes.data('radius', 60);
-                    existingNodes.data('color', '#337ab7');
-                    existingNodes.data('selectedColor', '#204d74');
-                }
                 if(isSelected) {
                    existingNodes.select();
                 } else {
                    existingNodes.unselect();
                 }
-            } else {
-                graphCy.add({
-                    group: 'nodes',
-                    data: {
-                        id: id,
-                        label: createLabel(id),
-                        radius: 60,
-                        color: '#337ab7',
-                        selectedColor: '#204d74'
-                    },
-                    position: {
-                        x: 100,
-                        y: 100
-                    },
-                    selected: isSelected
+                existingNodes.forEach(function(node) {
+                    var nodeObj = {
+                        data: node.data(),
+                        style: node.style()
+                    }
+                    applyEntityStyle(nodeObj.data.type, true, nodeObj);
+                    node.data(nodeObj.data);
+                    node.style(nodeObj.style);
                 });
+            } else {
+                var cyNode = {
+                     group: 'nodes',
+                     data: {
+                         id: id,
+                         label: createLabel(id)
+                     },
+                     position: {
+                         x: 100,
+                         y: 100
+                     },
+                     selected: isSelected
+                }
+                applyEntityStyle(schema.entities[entity.group].vertex, true, cyNode);
+                graphCy.add(cyNode);
             }
         }
 
@@ -350,22 +501,30 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
                 } else {
                    existingNodes.unselect();
                 }
+                existingNodes.forEach(function(node) {
+                    var nodeObj = {
+                        data: node.data(),
+                        style: node.style()
+                    }
+                    applyEntityStyle(schema.edges[edge.group].source, nodeObj.data.hasEntities, nodeObj);
+                    node.data(nodeObj.data);
+                    node.style(nodeObj.style);
+                });
             } else {
-                graphCy.add({
+                var cyNode = {
                     group: 'nodes',
                     data: {
                         id: edge.source,
-                        label: createLabel(edge.source),
-                        radius: 20,
-                        color: '#888',
-                        selectedColor: '#444'
+                        label: createLabel(edge.source)
                     },
                     position: {
                         x: 100,
                         y: 100
                     },
-                    selected:isSelected
-                });
+                    selected:isSelected,
+                }
+                applyEntityStyle(schema.edges[edge.group].source, false, cyNode);
+                graphCy.add(cyNode);
             }
 
             existingNodes = graphCy.getElementById(edge.destination);
@@ -376,22 +535,22 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
                 } else {
                    existingNodes.unselect();
                 }
+                existingNodes.addClass(schema.edges[edge.group].destination);
             } else {
-                graphCy.add({
-                    group: 'nodes',
-                    data: {
-                        id: edge.destination,
-                        label: createLabel(edge.destination),
-                        radius: 20,
-                        color: '#888',
-                        selectedColor: '#444'
-                    },
-                    position: {
-                        x: 100,
-                        y: 100
-                    },
-                    selected: isSelected
-                });
+                var cyNode = {
+                     group: 'nodes',
+                     data: {
+                         id: edge.destination,
+                         label: createLabel(edge.destination)
+                     },
+                     position: {
+                         x: 100,
+                         y: 100
+                     },
+                     selected: isSelected
+                };
+                applyEntityStyle(schema.edges[edge.group].destination, false, cyNode);
+                graphCy.add(cyNode);
             }
 
             var existingEdges = graphCy.getElementById(id);
@@ -403,29 +562,32 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
                    existingEdges.unselect();
                 }
             } else {
-                graphCy.add({
-                    group: 'edges',
-                    data: {
-                        id: id,
-                        source: edge.source,
-                        target: edge.destination,
-                        group: edge.group,
-                        selectedColor: '#35500F',
-                    },
-                    selected: isSelected
-                });
+                var cyEdge = {
+                     group: 'edges',
+                     data: {
+                         id: id,
+                         source: edge.source,
+                         target: edge.destination,
+                         group: edge.group
+                     },
+                     selected: isSelected
+                };
+                applyEdgeStyle(edge.group, cyEdge);
+                graphCy.add(cyEdge);
             }
         }
+        graph.redraw();
     }
 
     /**
-     * Removes all elements from the cytoscape graph - does not remove them from the model
-     * This is not actually used anywhere
+     * Removes all elements from the cytoscape graph - does not remove them from the model.
      */
     graph.clear = function(){
+        graph.removeSelected();
         while(graphCy.elements().length > 0) {
             graphCy.remove(graphCy.elements()[0]);
         }
+        input.reset();
     }
 
     /**
@@ -433,13 +595,41 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
      */
     graph.redraw = function() {
         if(graphCy) {
+            var nodes = graphCy.nodes();
+            for(var i in nodes) {
+                if(nodes[i] && nodes[i].hasClass && nodes[i].hasClass("filtered")) {
+                    nodes[i].remove();
+                }
+            }
             graphCy.layout(layoutConf);
         }
     }
 
+    graph.filter = function(searchTerm) {
+        searchTerm = searchTerm.toLowerCase();
+        var nodes = graphCy.nodes();
+        for(var i in nodes) {
+            if(nodes[i].data && nodes[i].data('id')) {
+                if(nodes[i].data('id').toLowerCase().indexOf(searchTerm) === -1) {
+                    nodes[i].addClass("filtered");
+                } else {
+                    nodes[i].removeClass("filtered");
+                }
+            }
+        }
+    }
+
+    graph.removeSelected = function() {
+        graphCy.filter(":selected").remove();
+        graphCy.elements().unselect();
+        selectedEdges = {};
+        selectedEntities = {};
+        events.broadcast('selectedElementsUpdate', [{"entities": selectedEntities, "edges": selectedEdges}]);
+    }
+
     /**
      * Helper method to create a label from a vertex
-     * @param {String} vertex 
+     * @param {String} vertex
      */
     var createLabel = function(vertex) {
         var label;
@@ -460,39 +650,6 @@ angular.module('app').factory('graph', ['types', '$q', 'results', 'common', 'con
         }
 
         return label;
-    }
-
-    /**
-     * Adds a seed to the graph
-     * @param {String} vertex 
-     */
-    var addEntitySeed = function(vertex){
-        var existingNodes = graphCy.getElementById(vertex);
-        var isSelected = common.objectContainsValue(selectedEntities, vertex);
-        if(existingNodes.length > 0) {
-            if(isSelected) {
-               existingNodes.select();
-            } else {
-               existingNodes.unselect();
-            }
-        } else {
-            graphCy.add({
-                group: 'nodes',
-                data: {
-                    id: vertex,
-                    label: createLabel(vertex),
-                    vertex: vertex,
-                    color: '#888',
-                    selectedColor: '#444',
-                    radius: 20
-                },
-                position: {
-                    x: 100,
-                    y: 100
-                },
-                selected: isSelected
-            });
-        }
     }
 
     /**

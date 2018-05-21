@@ -19,13 +19,92 @@
 /**
  * Schema view service which handles selected elements and a cytoscape schemaView
  */
-angular.module('app').factory('schemaView', ['types', '$q', 'common', 'events', function(types, $q, common, events) {
+angular.module('app').factory('schemaView', ['types', '$q', 'common', 'events', 'schema', function(types, $q, common, events, schemaService) {
 
     var schemaCy;
     var schemaView = {};
 
     var selectedVertices = [];
     var selectedEdges = [];
+
+    var style = {
+        entity: {
+            general: {
+              'text-valign': 'top',
+              'font-size': 14,
+              'text-outline-color':'#fff',
+              'text-outline-width':2,
+              'width': '30',
+              'height': '30',
+              'shape': 'circle',
+              'background-fit': 'cover',
+              'background-clip': 'none',
+              'padding': '0px',
+              'min-zoomed-font-size': 10,
+              'default-color': '#aaa',
+              'selected-color': '#777'
+            },
+            hasEntities: {
+              'width': '30',
+              'height': '30',
+              'border-color': '#555',
+              'border-width': 2
+            }
+        },
+        edge: {
+            general: {
+                'curve-style': 'bezier',
+                'target-arrow-shape': 'triangle',
+                'font-size': 14,
+                'color': '#fff',
+                'text-outline-width':3,
+                'width': 5,
+                'min-zoomed-font-size': 10,
+                'default-color': '#aaa',
+                'selected-color': '#777'
+            }
+        },
+        entities: {},
+        edges: {}
+    };
+
+    var applyEntityStyle = function(type, hasEntities, entity) {
+        var entityStyle = angular.copy(style.entity.general);
+        if(hasEntities) {
+            angular.merge(entityStyle, angular.copy(style.entity.hasEntities));
+        }
+        if(type in style.entities) {
+            angular.merge(entityStyle, angular.copy(style.entities[type]));
+        }
+        if('icon-name' in entityStyle) {
+            entityStyle['background-image'] = 'app/img/material-icons/' + entityStyle['icon-name'] + '_24px.svg'
+            entityStyle.shape = 'roundrectangle';
+            entityStyle['default-color'] = '#fff';
+        } else if('background-image' in entityStyle) {
+            entityStyle.shape = 'roundrectangle';
+            entityStyle['default-color'] = '#fff';
+        }
+        if(!('data' in entity)) {
+            entity.data = {};
+        }
+        entity.data.defaultColor = entityStyle['default-color'];
+        entity.data.selectedColor = entityStyle['selected-color'];
+        entity.style = entityStyle;
+    }
+
+    var applyEdgeStyle = function(type, edge) {
+        var edgeStyle = angular.copy(style.edge.general);
+        if(type in style.edges) {
+            angular.merge(edgeStyle, angular.copy(style.edges[type]));
+        }
+
+        if(!('data' in edge)) {
+            edge.data = {};
+        }
+        edge.data.defaultColor = edgeStyle['default-color'];
+        edge.data.selectedColor = edgeStyle['selected-color'];
+        edge.style = edgeStyle;
+    }
 
     var layoutConf = {
         name: 'cytoscape-ngraph.forcelayout',
@@ -35,13 +114,17 @@ angular.module('app').factory('schemaView', ['types', '$q', 'common', 'events', 
             waitForStep: true
         },
         physics: {
-            springLength: 150,
+            springLength: 250,
             fit: true
         },
         iterations: 10000,
         fit: true,
         animate: false
     };
+
+    schemaService.getStyle().then(function(schemaStyle) {
+        angular.merge(style, angular.copy(schemaStyle));
+    });
 
     /**
      * Loads cytoscape schemaView onto an element containing the "schemaCy" id. It also registers the 
@@ -56,37 +139,30 @@ angular.module('app').factory('schemaView', ['types', '$q', 'common', 'events', 
                     selector: 'node',
                     style: {
                         'content': 'data(label)',
-                        'text-valign': 'center',
-                        'background-color': 'data(color)',
-                        'font-size': 14,
-                        'color': '#fff',
-                        'text-outline-color':'data(color)',
-                        'text-outline-width':3,
-                        'width': 'data(radius)',
-                        'height': 'data(radius)'
+                        'background-color': 'data(defaultColor)',
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
-                        'curve-style': 'bezier',
                         'label': 'data(group)',
-                        'line-color': '#538212',
-                        'target-arrow-color': '#538212',
-                        'target-arrow-shape': 'triangle',
-                        'font-size': 14,
-                        'color': '#fff',
-                        'text-outline-color':'#538212',
-                        'text-outline-width':3,
-                        'width': 5
+                        'line-color': 'data(defaultColor)',
+                        'target-arrow-color': 'data(defaultColor)',
+                        'text-outline-color': 'data(defaultColor)'
                     }
                 },
                 {
-                    selector: ':selected',
+                    selector: 'node:selected',
                     css: {
                         'background-color': 'data(selectedColor)',
-                        'line-color': '#35500F',
-                        'target-arrow-color': '#35500F'
+                    }
+                },
+                {
+                    selector: 'edge:selected',
+                     css: {
+                        'line-color': 'data(selectedColor)',
+                        'target-arrow-color': 'data(selectedColor)',
+                        'text-outline-color': 'data(selectedColor)'
                     }
                 }
             ],
@@ -158,57 +234,55 @@ angular.module('app').factory('schemaView', ['types', '$q', 'common', 'events', 
         }
 
         for(var i in nodes) {
-            schemaCy.add({
-                group: 'nodes',
-                data: {
-                    id: nodes[i],
-                    label: nodes[i],
-                    radius: 60,
-                    color: '#337ab7',
-                    selectedColor: '#204d74'
-                }
-            });
+            var cyNode = {
+               group: 'nodes',
+               data: {
+                   id: nodes[i],
+                   label: nodes[i],
+               }
+           }
+           applyEntityStyle(nodes[i], true, cyNode);
+           schemaCy.add(cyNode);
         }
 
         for(var group in schema.edges) {
             var edge = schema.edges[group];
             if(nodes.indexOf(edge.source) === -1) {
                 nodes.push(edge.source);
-                schemaCy.add({
-                    group: 'nodes',
-                    data: {
-                        id: edge.source,
-                        label: edge.source,
-                        radius: 20,
-                        color: '#888',
-                        selectedColor: '#444'
-                    }
-                });
+                var cyNode = {
+                     group: 'nodes',
+                     data: {
+                         id: edge.source,
+                         label: edge.source
+                     }
+                }
+                applyEntityStyle(edge.source, false, cyNode);
+                schemaCy.add(cyNode);
             }
             if(nodes.indexOf(edge.destination) === -1) {
                 nodes.push(edge.destination);
-                schemaCy.add({
-                    group: 'nodes',
-                    data: {
-                        id: edge.destination,
-                        label: edge.destination,
-                        radius: 20,
-                        color: '#888',
-                        selectedColor: '#444'
-                    }
-                });
+                var cyNode = {
+                     group: 'nodes',
+                     data: {
+                         id: edge.destination,
+                         label: edge.destination
+                     }
+                 }
+                applyEntityStyle(edge.destination, false, cyNode);
+                schemaCy.add(cyNode);
             }
 
-            schemaCy.add({
-                group: 'edges',
-                data: {
-                    id: edge.source + "|" + edge.destination + "|" + edge.directed + "|" + group,
-                    source: edge.source,
-                    target: edge.destination,
-                    group: group,
-                    selectedColor: '#35500F',
-                }
-            });
+            var cyEdge = {
+                 group: 'edges',
+                 data: {
+                     id: edge.source + "|" + edge.destination + "|" + edge.directed + "|" + group,
+                     source: edge.source,
+                     target: edge.destination,
+                     group: group
+                 }
+            };
+            applyEdgeStyle(group, cyEdge);
+            schemaCy.add(cyEdge);
         }
     }
 
